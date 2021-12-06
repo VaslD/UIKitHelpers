@@ -78,12 +78,8 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
                 return self.subviewControllers[previousIndex]
             }
 
-#if DEBUG
             assertionFailure("Current index > 0 but (index - 1) is out of range. Why?")
             return nil
-#else
-            return self.subviewControllers.first
-#endif
         }
     }
 
@@ -119,12 +115,8 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
                 return self.subviewControllers[nextIndex]
             }
 
-#if DEBUG
             assertionFailure("Current index < (count - 1) but (index + 1) is out of range. Why?")
             return nil
-#else
-            return self.subviewControllers.first
-#endif
         }
     }
 
@@ -155,6 +147,27 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
             return -1
         }
         return first
+    }
+
+    // MARK: Transition
+
+    public weak var delegate: LooperViewControllerDelegate?
+
+    public func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool,
+                                   previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
+        guard let previous = previousViewControllers.first else { return }
+
+        if let dataSource = self.dataSource {
+            let previousIndex = dataSource.looper(self, indexOf: WrapperViewController.unwrap(previous))
+            self.delegate?.looper(self, didEndTransitionFrom: previousIndex, to: self.currentIndex)
+            return
+        }
+
+        let currentIndex = self.currentIndex
+        guard let previousIndex = self.subviewControllers.firstIndex(of: previous), currentIndex != -1 else {
+            return
+        }
+        self.delegate?.looper(self, didEndTransitionFrom: previousIndex, to: currentIndex)
     }
 
     // MARK: Data Source
