@@ -1,4 +1,5 @@
 import AutoLayout
+import Foundation
 import UIKit
 
 // MARK: - LooperViewControllerDataSource
@@ -21,6 +22,11 @@ public extension LooperViewControllerDataSource {
 public protocol LooperViewControllerDelegate: AnyObject {
     func looper(_ viewController: LooperViewController, willBeginTransitionFrom index: Int, to nextIndex: Int)
     func looper(_ viewController: LooperViewController, didEndTransitionFrom previousIndex: Int, to index: Int)
+    func looper(_ viewController: LooperViewController, autoTransitionedTo index: Int)
+}
+
+public extension LooperViewControllerDelegate {
+    func looper(_ viewController: LooperViewController, autoTransitionedTo index: Int) {}
 }
 
 // MARK: - LooperViewController
@@ -37,6 +43,10 @@ public protocol LooperViewControllerDelegate: AnyObject {
 /// - 通过 ``LooperViewControllerDelegate/looper(_:didEndTransitionFrom:to:)`` 回调页面切换后的上一个和当前页面索引。
 public class LooperViewController: UIViewController, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
     // MARK: Lifecycle
+
+    deinit {
+        self.pendingTransition = nil
+    }
 
     override public func loadView() {
         super.loadView()
@@ -61,6 +71,11 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
             }()
             self.pager.setViewControllers(controllers, direction: .forward, animated: false)
         }
+    }
+
+    override public func removeFromParent() {
+        self.cancelAutoScroll()
+        super.removeFromParent()
     }
 
     // MARK: Looper
@@ -112,46 +127,22 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
                 return self.subviewControllers[previousIndex]
             }
 
-            assertionFailure("Current index > 0 but (index - 1) is out of range. Why?")
+            breakpoint("Current index > 0 but (index - 1) is out of range. Why?")
             return nil
         }
     }
 
     public func pageViewController(_ pageViewController: UIPageViewController,
                                    viewControllerAfter viewController: UIViewController) -> UIViewController? {
-        if let dataSource = self.dataSource {
-            let count = dataSource.numberOfItems(inLooper: self)
+        if self.dataSource != nil {
             let index = self.currentIndex
-            let item: Item? = {
-                switch index {
-                case -1:
-                    return nil
-                case count - 1:
-                    return dataSource.looper(self, itemAt: 0)
-                default:
-                    return dataSource.looper(self, itemAt: index + 1)
-                }
-            }()
-
-            return item?.asViewController()
+            return self.viewController(after: index)
         }
 
         guard let index = self.subviewControllers.firstIndex(of: viewController) else {
             return nil
         }
-
-        switch index {
-        case self.subviewControllers.endIndex - 1:
-            return self.subviewControllers.first
-        default:
-            let nextIndex = index + 1
-            if self.subviewControllers.indices.contains(nextIndex) {
-                return self.subviewControllers[nextIndex]
-            }
-
-            assertionFailure("Current index < (count - 1) but (index + 1) is out of range. Why?")
-            return nil
-        }
+        return self.viewController(after: index)
     }
 
     // MARK: Indexing
@@ -160,13 +151,13 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
 
     public var currentIndex: Int {
         guard let current = self.pager.viewControllers?.first else {
-            assertionFailure("UIPageViewController has no current view controller. Is this an error?")
+            breakpoint("UIPageViewController has no current view controller. Is this an error?")
             return -1
         }
 
         if let dataSource = self.dataSource {
             guard !self.shouldDetectRecursion else {
-                assertionFailure("Recursion detected when using data source!")
+                breakpoint("Recursion detected when using data source!")
                 return 0
             }
             self.shouldDetectRecursion = true
@@ -177,25 +168,77 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
         }
 
         guard let first = self.subviewControllers.firstIndex(of: current) else {
-            assertionFailure("Currently displayed view controller not in data source?!")
+            breakpoint("Currently displayed view controller not in data source?!")
             return -1
         }
         return first
+    }
+
+    public var count: Int {
+        if let dataSource = self.dataSource {
+            guard !self.shouldDetectRecursion else {
+                breakpoint("Recursion detected when using data source!")
+                return 0
+            }
+            self.shouldDetectRecursion = true
+            defer {
+                self.shouldDetectRecursion = false
+            }
+            return dataSource.numberOfItems(inLooper: self)
+        }
+
+        return self.subviewControllers.count
+    }
+
+    private func indexIsValid(_ index: Int) -> Bool {
+        if let dataSource = self.dataSource {
+            return (0..<dataSource.numberOfItems(inLooper: self)).contains(index)
+        }
+        return self.subviewControllers.indices.contains(index)
+    }
+
+    private func index(after index: Int) -> Int {
+        let max = max({
+            if let dataSource = self.dataSource {
+                return dataSource.numberOfItems(inLooper: self)
+            }
+            return self.subviewControllers.count
+        }() - 1, 1)
+
+        switch index {
+        case ..<0:
+            return 0
+        case 0..<max:
+            return index + 1
+        case max...:
+            return 0
+        default:
+            breakpoint("Impossible! Switch already covered all cases.")
+            return 0
+        }
     }
 
     // MARK: Transition
 
     public weak var delegate: LooperViewControllerDelegate?
 
+    private var pendingTransition: DispatchWorkItem? {
+        willSet {
+            self.pendingTransition?.cancel()
+        }
+    }
+
     public func pageViewController(_ pageViewController: UIPageViewController,
                                    willTransitionTo pendingViewControllers: [UIViewController]) {
+        self.pendingTransition = nil
+
         guard let next = pendingViewControllers.first else {
             return
         }
 
         if let dataSource = self.dataSource {
             let nextIndex = dataSource.looper(self, indexOf: WrapperViewController.unwrap(next))
-            self.delegate?.looper(self, willBeginTransitionFrom: self.currentIndex, to: nextIndex)
+            self.preTransitionHook(from: self.currentIndex, to: nextIndex)
             return
         }
 
@@ -203,7 +246,7 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
         guard let nextIndex = self.subviewControllers.firstIndex(of: next), currentIndex != -1 else {
             return
         }
-        self.delegate?.looper(self, willBeginTransitionFrom: currentIndex, to: nextIndex)
+        self.preTransitionHook(from: currentIndex, to: nextIndex)
     }
 
     public func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool,
@@ -212,7 +255,7 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
 
         if let dataSource = self.dataSource {
             let previousIndex = dataSource.looper(self, indexOf: WrapperViewController.unwrap(previous))
-            self.delegate?.looper(self, didEndTransitionFrom: previousIndex, to: self.currentIndex)
+            self.postTransitionHook(from: previousIndex, to: self.currentIndex)
             return
         }
 
@@ -220,7 +263,60 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
         guard let previousIndex = self.subviewControllers.firstIndex(of: previous), currentIndex != -1 else {
             return
         }
-        self.delegate?.looper(self, didEndTransitionFrom: previousIndex, to: currentIndex)
+        self.postTransitionHook(from: previousIndex, to: currentIndex)
+    }
+
+    private func preTransitionHook(from index: Int, to nextIndex: Int) {
+        self.delegate?.looper(self, willBeginTransitionFrom: index, to: nextIndex)
+    }
+
+    private func setViewController(_ viewController: UIViewController, animated: Bool = true,
+                                   completion: ((Bool) -> Void)? = nil) {
+        // TODO: Delegate code transition.
+        self.pager.setViewControllers([viewController], direction: .forward,
+                                      animated: animated, completion: completion)
+    }
+
+    /// 翻到指定页面。
+    ///
+    /// - Parameter index: 新页面索引
+    /// - Returns: 是否存在指定页面
+    @discardableResult public func scrollTo(index: Int) -> Bool {
+        guard let nextViewController = self.viewController(after: index - 1) else {
+            return false
+        }
+        self.pager.setViewControllers([nextViewController], direction: .forward, animated: true) { _ in
+            // TODO: Delegate auto transition.
+            self.scheduleAutoScroll(to: self.index(after: index), after: 5)
+        }
+        return true
+    }
+
+    private func postTransitionHook(from previousIndex: Int, to index: Int) {
+        self.delegate?.looper(self, didEndTransitionFrom: previousIndex, to: index)
+
+        // TODO: Callback.
+        self.scheduleAutoScroll(to: self.index(after: index), after: 5)
+    }
+
+    /// 计划自动翻页。调用此方法将取消先前所有计划翻页。
+    ///
+    /// - Parameters:
+    ///   - index: 请求翻页到此索引。翻页前将重复检查索引有效性，无效索引将被丢弃。
+    ///   - delay: 等待时间，自现在开始计时。
+    public func scheduleAutoScroll(to index: Int, after delay: TimeInterval) {
+        let nextTransition = DispatchWorkItem { [weak self] in
+            guard let self = self, self.indexIsValid(index) else { return }
+            self.scrollTo(index: index)
+            self.delegate?.looper(self, autoTransitionedTo: index)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: nextTransition)
+        self.pendingTransition = nextTransition
+    }
+
+    /// 取消所有自动翻页。
+    public func cancelAutoScroll() {
+        self.pendingTransition = nil
     }
 
     // MARK: Data Source
@@ -240,6 +336,37 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
     ///
     ///
     public private(set) weak var dataSource: LooperViewControllerDataSource?
+
+    private func viewController(after index: Int) -> UIViewController? {
+        // 询问数据源
+        if let dataSource = self.dataSource {
+            let count = dataSource.numberOfItems(inLooper: self)
+            let item: Item? = {
+                switch index {
+                case count - 1:
+                    return dataSource.looper(self, itemAt: 0)
+                default:
+                    return dataSource.looper(self, itemAt: index + 1)
+                }
+            }()
+
+            return item?.asViewController()
+        }
+
+        // 取静态数据
+        switch index {
+        case self.subviewControllers.endIndex - 1:
+            return self.subviewControllers.first
+        default:
+            let nextIndex = index + 1
+            if self.subviewControllers.indices.contains(nextIndex) {
+                return self.subviewControllers[nextIndex]
+            }
+
+            assertionFailure("Current index < (count - 1) but (index + 1) is out of range. Why?")
+            return nil
+        }
+    }
 
     /// 设置一个或多个 `UIViewController` 作为数据源。如果通过此方法设置静态数据，基于回调的数据源将被舍弃。
     ///
@@ -391,4 +518,13 @@ final class WrapperViewController: UIViewController {
             return .viewController(viewController)
         }
     }
+}
+
+// MARK: - Debugging
+
+private func breakpoint(_ message: String) {
+    print(message)
+#if DEBUG
+    raise(SIGINT)
+#endif
 }
