@@ -10,7 +10,8 @@ let package = Package(
     products: [
         .library(name: "UIKitHelpers", targets: ["UIKitHelpers"])
     ],
-    dependencies: [],
+    dependencies: [
+        .package(name: "Auto Layout", path: "../Auto Layout")],
     targets: [
         .target(name: "UIKitHelpers"),
     ]
