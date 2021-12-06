@@ -153,6 +153,25 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
 
     public weak var delegate: LooperViewControllerDelegate?
 
+    public func pageViewController(_ pageViewController: UIPageViewController,
+                                   willTransitionTo pendingViewControllers: [UIViewController]) {
+        guard let next = pendingViewControllers.first else {
+            return
+        }
+
+        if let dataSource = self.dataSource {
+            let nextIndex = dataSource.looper(self, indexOf: WrapperViewController.unwrap(next))
+            self.delegate?.looper(self, willBeginTransitionFrom: self.currentIndex, to: nextIndex)
+            return
+        }
+
+        let currentIndex = self.currentIndex
+        guard let nextIndex = self.subviewControllers.firstIndex(of: next), currentIndex != -1 else {
+            return
+        }
+        self.delegate?.looper(self, willBeginTransitionFrom: currentIndex, to: nextIndex)
+    }
+
     public func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool,
                                    previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
         guard let previous = previousViewControllers.first else { return }
