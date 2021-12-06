@@ -1,6 +1,40 @@
 import AutoLayout
 import UIKit
 
+// MARK: - LooperViewControllerDataSource
+
+public protocol LooperViewControllerDataSource: AnyObject {
+    func numberOfItems(inLooper viewController: LooperViewController) -> Int
+    func startIndex(ofLooper viewController: LooperViewController) -> Int
+    func looper(_ viewController: LooperViewController, itemAt index: Int) -> LooperViewController.Item
+    func looper(_ viewController: LooperViewController, indexOf item: LooperViewController.Item) -> Int
+}
+
+public extension LooperViewControllerDataSource {
+    func startIndex(ofLooper viewController: LooperViewController) -> Int {
+        0
+    }
+}
+
+// MARK: - LooperViewControllerDelegate
+
+public protocol LooperViewControllerDelegate: AnyObject {
+    func looper(_ viewController: LooperViewController, willBeginTransitionFrom index: Int, to nextIndex: Int)
+    func looper(_ viewController: LooperViewController, didEndTransitionFrom previousIndex: Int, to index: Int)
+}
+
+// MARK: - LooperViewController
+
+/// 轮播视图控制器，支持横、纵布局。
+///
+/// 支持 3 种（互斥）视图提供方式：
+/// - 使用 ``setViewControllers(_:startIndex:)`` 提供需要轮播的子视图控制器，控制器将由 ``LooperViewController`` 管理。
+/// - 使用 ``setViews(_:startIndex:respectsSafeAreaInsets:)`` 提供需要轮播的视图，视图将由 ``LooperViewController`` 管理。
+/// - 使用 ``setDataSource(_:)`` 设置 ``LooperViewControllerDataSource`` 作为数据源，轮播过程中所有页面和索引处理都将请求数据源。
+///
+/// 同时支持 2 个事件回调：
+/// - 通过 ``LooperViewControllerDelegate/looper(_:willBeginTransitionFrom:to:)`` 回调页面切换前的当前和下一个页面索引。
+/// - 通过 ``LooperViewControllerDelegate/looper(_:didEndTransitionFrom:to:)`` 回调页面切换后的上一个和当前页面索引。
 public class LooperViewController: UIViewController, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
     // MARK: Lifecycle
 
@@ -309,6 +343,24 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
             self.pager.setViewControllers([controller], direction: .forward, animated: false)
         }
         self.dataSource = dataSource
+    }
+}
+
+// MARK: - LooperViewController.Item
+
+public extension LooperViewController {
+    enum Item {
+        case view(UIView, respectsSafeAreaInsets: Bool?)
+        case viewController(UIViewController)
+
+        func asViewController() -> UIViewController {
+            switch self {
+            case let .view(view, respectsSafeAreaInsets):
+                return WrapperViewController.wrap(view, respectsSafeAreaInsets: respectsSafeAreaInsets == true)
+            case let .viewController(viewController):
+                return viewController
+            }
+        }
     }
 }
 
