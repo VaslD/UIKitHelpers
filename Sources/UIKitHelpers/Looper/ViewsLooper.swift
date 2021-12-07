@@ -14,7 +14,7 @@ open class ViewsLooper: ViewControllersLooper {
 
 // MARK: - Wrapper
 
-final class WrapperViewController: UIViewController {
+private final class WrapperViewController: UIViewController {
     private var content: UIView!
 
     static func wrap(_ view: UIView, respectsSafeAreaInsets: Bool) -> Self {
