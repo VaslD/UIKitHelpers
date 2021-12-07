@@ -2,8 +2,21 @@ import UIKit
 
 /// 自动管理子 `UIViewController` 的轮播组件。
 ///
-/// 使用此组件时不能，通过 ``setViewControllers(_:startIndex:)`` 设置
+/// 使用此组件时不能修改 ``LooperViewController/dataSource``，请通过 ``setViewControllers(_:startIndex:)``
+/// 提供每页的 `UIViewController`。
 open class ViewControllersLooper: LooperViewController, LooperDataSource {
+    override public init(nibName nib: String?, bundle: Bundle?) {
+        super.init(nibName: nib, bundle: bundle)
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override public init(orientation: UIPageViewController.NavigationOrientation) {
+        super.init(orientation: orientation)
+    }
+
     override open func viewDidLoad() {
         super.viewDidLoad()
         self.dataSource = self
@@ -13,7 +26,7 @@ open class ViewControllersLooper: LooperViewController, LooperDataSource {
 
     public private(set) var subviewControllers = [UIViewController]()
 
-    public private(set) var startIndex: Int = 0
+    public private(set) var startIndex = 0
 
     public var numberOfItems: Int {
         self.subviewControllers.count
@@ -27,10 +40,8 @@ open class ViewControllersLooper: LooperViewController, LooperDataSource {
     }
 
     public func indexOf(_ viewController: UIViewController) -> Int? {
-        return self.subviewControllers.firstIndex(of: viewController)
+        self.subviewControllers.firstIndex(of: viewController)
     }
-
-    // MARK: Interface
 
     public func setViewControllers(_ viewControllers: [UIViewController], startIndex: Int = 0) {
         self.subviewControllers = viewControllers
@@ -48,5 +59,16 @@ open class ViewControllersLooper: LooperViewController, LooperDataSource {
         } else {
             self.setViewController(nil, animated: true)
         }
+    }
+
+    // MARK: Transition
+
+    public var autoTransitionInterval: TimeInterval = 3
+
+    override open func delayBeforeAutoTransition(at index: Int) -> TimeInterval {
+        if let delegate = self.delegate {
+            return delegate.delayBeforeAutoTransition(at: index)
+        }
+        return self.autoTransitionInterval
     }
 }

@@ -18,12 +18,12 @@ public protocol LooperTransitionDelegate: AnyObject {
     ///   - index: 切换后位置
     func looperDidTransition(from previousIndex: Int, to index: Int)
 
-    /// 轮播页面即将被代码（包括定时器、回调、异步执行等）切换。
+    /// 轮播页面即将被代码（包括定时器、重新加载数据源、跳过页面等）切换。
     ///
     /// - Parameter index: 新位置
     func prepareForAutoTransition(to index: Int?)
 
-    /// 轮播页面被代码（包括定时器、回调、异步执行等）自动切换。
+    /// 轮播页面被代码（包括定时器、重新加载数据源、跳过页面等）切换。
     ///
     /// - Parameters:
     ///   - index: 切换后位置

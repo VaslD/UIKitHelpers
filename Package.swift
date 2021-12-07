@@ -3,7 +3,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "UIKit Helpers",
+    name: "UIKitHelpers",
     platforms: [
         .iOS(.v11)
     ],

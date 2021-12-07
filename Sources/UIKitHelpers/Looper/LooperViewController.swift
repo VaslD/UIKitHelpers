@@ -9,6 +9,10 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     // MARK: UIViewController
 
+    override public init(nibName nib: String?, bundle: Bundle?) {
+        super.init(nibName: nib, bundle: bundle)
+    }
+
     public required init?(coder: NSCoder) {
         super.init(coder: coder)
     }
@@ -26,7 +30,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     /// 轮播布局方向。
     ///
-    /// 默认为横向。此属性只能在视图加载前（例如构造后）设置，当系统或调用者首次访问 ``LooperViewController``
+    /// 默认为横向。此属性只能在视图加载前（例如构造后）设置，当 UIKit 或调用者首次访问 ``LooperViewController``
     /// 的视图 （`view`) 时，视图将根据布局方向创建并冻结，以后将不再参考此属性。
     public private(set) var orientation: UIPageViewController.NavigationOrientation = .horizontal
 
@@ -42,8 +46,10 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
         $1.addChild($0)
         $1.view.addSubview($0.view)
         $0.view.autoLayout(in: $1.view, top: 0, bottom: 0, leading: 0, trailing: 0)
+        $0.didMove(toParent: self)
+        self.scrollView = $0.view.subviews.first { $0 is UIScrollView } as? UIScrollView
         return $0
-    }(UIPageViewController(transitionStyle: .scroll, navigationOrientation: self.orientation, options: nil), self)
+    }(PageViewController(transitionStyle: .scroll, navigationOrientation: self.orientation, options: nil), self)
 
     public func pageViewController(_ pageViewController: UIPageViewController,
                                    viewControllerBefore viewController: UIViewController) -> UIViewController? {
@@ -97,6 +103,22 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
         }
     }
 
+    // MARK: Scroll View
+
+    private var scrollView: UIScrollView?
+
+    /// 中断 `UIPageViewController` 正在追踪的手势。
+    ///
+    /// - Returns: 中断手势时页面是否可能正在响应用户操作。
+    public func cancelTouches() -> Bool {
+        if self.scrollView?.isTracking == true || self.scrollView?.isDecelerating == true {
+            self.scrollView!.panGestureRecognizer.isEnabled = false
+            self.scrollView!.panGestureRecognizer.isEnabled = true
+            return true
+        }
+        return false
+    }
+
     // MARK: Data Source
 
     /// 轮播数据源。仅直接使用 ``LooperViewController`` 时（而非派生类型时）支持修改。
@@ -118,7 +140,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     /// 检查索引是否存在或可用。
     ///
-    /// 默认实现检查索引是否在 0 至 ``LooperDataSource/numberOfItems`` 之间。
+    /// 默认实现：检查索引是否在 0 至 ``LooperDataSource/numberOfItems`` 之间。
     ///
     /// - Parameter index: 待查询索引
     /// - Returns: 索引是否有效。
@@ -132,7 +154,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     /// 根据当前索引，获取需要显示的上一页索引。
     ///
-    /// 默认实现非 0 位置索引 - 1，否则返回 ``LooperDataSource/numberOfItems`` - 1。
+    /// 默认实现：非 0 位置返回索引 - 1，否则返回 ``LooperDataSource/numberOfItems`` - 1。
     ///
     /// - Parameter index: 待查询索引
     /// - Returns: 上一页索引，可能为 `nil`。
@@ -161,7 +183,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     /// 根据当前索引，获取需要显示的下一页索引。
     ///
-    /// 默认实现当索引为 ``LooperDataSource/numberOfItems`` - 1 时返回 0，否则将索引 + 1。
+    /// 默认实现：索引为 ``LooperDataSource/numberOfItems`` - 1 时返回 0，否则将索引 + 1。
     ///
     /// - Parameter index: 待查询索引
     /// - Returns: 下一页索引，可能为 `nil`。
@@ -193,7 +215,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
     /// - Parameter index: 待查询索引
     /// - Returns: 上一页的 `UIViewController`，可能为 `nil`。
     open func viewController(before index: Int) -> UIViewController? {
-        return self.index(before: index).flatMap { self.dataSource?.viewController(at: $0) }
+        self.index(before: index).flatMap { self.dataSource?.viewController(at: $0) }
     }
 
     /// 根据当前索引，获取需要显示的下一个 `UIViewController`。
@@ -201,7 +223,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
     /// - Parameter index: 待查询索引
     /// - Returns: 下一页的 `UIViewController`，可能为 `nil`。
     open func viewController(after index: Int) -> UIViewController? {
-        return self.index(after: index).flatMap { self.dataSource?.viewController(at: $0) }
+        self.index(after: index).flatMap { self.dataSource?.viewController(at: $0) }
     }
 
     // MARK: Transition
@@ -216,7 +238,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
         if let delegate = self.delegate {
             return delegate.delayBeforeAutoTransition(at: index)
         }
-        return 3
+        return 0
     }
 
     /// 重置或刷新当前显示的 `UIViewController`。将重新触发定时器和数据源请求。
@@ -225,27 +247,36 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
     ///   - viewController: 新的 `UIViewController`
     ///   - animated: 是否使用动画
     func setViewController(_ viewController: UIViewController?, animated: Bool) {
-        self.delegate?.prepareForAutoTransition(to: viewController.flatMap { self.dataSource?.indexOf($0) })
+        let runsAsync = self.cancelTouches()
 
-        self.pager.setViewControllers(
-            viewController.flatMap { [$0] }, direction: .forward, animated: animated
-        ) { [weak self] completed in
-            guard let self = self else { return }
-            if let viewController = viewController, let index = self.dataSource?.indexOf(viewController) {
-                self.delegate?.postProcessAutoTransition(to: index, withAnimation: completed)
+        let work = DispatchWorkItem {
+            self.delegate?.prepareForAutoTransition(to: viewController.flatMap { self.dataSource?.indexOf($0) })
 
-                if let nextIndex = self.index(after: index) {
-                    self.scheduleTransition(to: nextIndex, after: self.delayBeforeAutoTransition(at: index))
+            self.pager.setViewControllers(
+                viewController.flatMap { [$0] }, direction: .forward, animated: animated
+            ) { [weak self] completed in
+                guard let self = self else { return }
+                if let viewController = viewController, let index = self.dataSource?.indexOf(viewController) {
+                    self.delegate?.postProcessAutoTransition(to: index, withAnimation: completed)
+
+                    if let nextIndex = self.index(after: index) {
+                        self.scheduleTransition(to: nextIndex, after: self.delayBeforeAutoTransition(at: index))
+                    }
+                } else {
+                    self.delegate?.postProcessAutoTransition(to: nil, withAnimation: completed)
                 }
+            }
+
+            if (self.dataSource?.numberOfItems ?? 0) > 1 {
+                self.setScrollingEnabled(true)
             } else {
-                self.delegate?.postProcessAutoTransition(to: nil, withAnimation: completed)
+                self.setScrollingEnabled(false)
             }
         }
-
-        if (self.dataSource?.numberOfItems ?? 0) > 1 {
-            self.setScrollingEnabled(true)
+        if runsAsync {
+            DispatchQueue.main.async(execute: work)
         } else {
-            self.setScrollingEnabled(false)
+            work.perform()
         }
     }
 
@@ -256,8 +287,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
     ///
     /// - Parameter index: 新位置
     /// - Returns: 是否成功滚动。
-    @discardableResult
-    public func scrollTo(index: Int) -> Bool {
+    @discardableResult public func scrollTo(index: Int) -> Bool {
         guard self.indexIsValid(index), let dataSource = self.dataSource,
               let viewController = self.dataSource?.viewController(at: index) else {
             return false
@@ -272,9 +302,9 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
         return true
     }
 
-    /// 设置滚动是否开启。
+    /// 设置是否允许滚动。
     ///
-    /// 页面不支持「轮播」时（例如只有一页），请勿开启滚动，否则将导致页面错位。
+    /// 页面不支持「轮播」时（例如只有一页），滚动将自动关闭。请勿强制开启滚动，否则将导致页面错位。
     ///
     /// - Parameter enabled: 允许滚动
     public func setScrollingEnabled(_ enabled: Bool) {
@@ -330,4 +360,22 @@ private func breakpoint(_ message: String) {
 #if DEBUG
     raise(SIGINT)
 #endif
+}
+
+// MARK: - PageViewController
+
+private class PageViewController: UIPageViewController {
+    override func setViewControllers(_ viewControllers: [UIViewController]?,
+                                     direction: UIPageViewController.NavigationDirection,
+                                     animated: Bool, completion: ((Bool) -> Void)? = nil) {
+        super.setViewControllers(viewControllers, direction: direction, animated: animated) { isFinished in
+            if isFinished, animated {
+                DispatchQueue.main.async {
+                    super.setViewControllers(viewControllers, direction: direction, animated: false, completion: nil)
+                }
+            }
+
+            completion?(isFinished)
+        }
+    }
 }

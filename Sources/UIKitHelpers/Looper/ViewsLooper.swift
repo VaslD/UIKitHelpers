@@ -1,8 +1,21 @@
 import UIKit
 
 /// 自动管理子 `UIView` 的轮播组件。
+///
+/// 使用此组件时不能修改 ``LooperViewController/dataSource``，请通过 ``setViews(_:respectsSafeAreaInsets:startIndex:)``
+/// 提供每页的 `UIView`。
 open class ViewsLooper: ViewControllersLooper {
-    // MARK: Interface
+    override public init(nibName nib: String?, bundle: Bundle?) {
+        super.init(nibName: nib, bundle: bundle)
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override public init(orientation: UIPageViewController.NavigationOrientation) {
+        super.init(orientation: orientation)
+    }
 
     public func setViews(_ views: [UIView], respectsSafeAreaInsets: Bool = false, startIndex: Int = 0) {
         let viewControllers: [UIViewController] = views.map {
