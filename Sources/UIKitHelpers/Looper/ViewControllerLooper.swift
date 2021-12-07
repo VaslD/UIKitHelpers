@@ -1,6 +1,8 @@
 import UIKit
 
 /// 自动管理子 `UIViewController` 的轮播组件。
+///
+/// 使用此组件时不能，通过 ``setViewControllers(_:startIndex:)`` 设置
 open class ViewControllersLooper: LooperViewController, LooperDataSource {
     override open func viewDidLoad() {
         super.viewDidLoad()
@@ -45,12 +47,6 @@ open class ViewControllersLooper: LooperViewController, LooperDataSource {
             self.setViewController(startViewController, animated: true)
         } else {
             self.setViewController(nil, animated: true)
-        }
-
-        if viewControllers.count == 1 {
-            self.setScrollEnabled(false)
-        } else {
-            self.setScrollEnabled(true)
         }
     }
 }

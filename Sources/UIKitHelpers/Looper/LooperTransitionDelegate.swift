@@ -18,23 +18,23 @@ public protocol LooperTransitionDelegate: AnyObject {
     ///   - index: 切换后位置
     func looperDidTransition(from previousIndex: Int, to index: Int)
 
-    /// 轮播页面即将被自动切换。
+    /// 轮播页面即将被代码（包括定时器、回调、异步执行等）切换。
     ///
     /// - Parameter index: 新位置
     func prepareForAutoTransition(to index: Int?)
 
-    /// 轮播页面被自动切换。
+    /// 轮播页面被代码（包括定时器、回调、异步执行等）自动切换。
     ///
     /// - Parameters:
     ///   - index: 切换后位置
     ///   - withAnimation: 自动切换是否使用了动画
     func postProcessAutoTransition(to index: Int?, withAnimation: Bool)
 
-    /// 轮播下次自动切换前等待时间。
+    /// 轮播在指定位置的停留时间。
     ///
     /// 返回 0 可在当前位置停止轮播。
     ///
-    /// - Parameter index: 当前位置
+    /// - Parameter index: 页面位置
     /// - Returns: 等待时间，单位：秒
     func delayBeforeAutoTransition(at index: Int) -> TimeInterval
 }

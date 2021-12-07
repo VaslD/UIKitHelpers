@@ -9,6 +9,10 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     // MARK: UIViewController
 
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
     deinit {
         self.stopAutoTransition()
     }
@@ -25,6 +29,13 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
     /// 默认为横向。此属性只能在视图加载前（例如构造后）设置，当系统或调用者首次访问 ``LooperViewController``
     /// 的视图 （`view`) 时，视图将根据布局方向创建并冻结，以后将不再参考此属性。
     public private(set) var orientation: UIPageViewController.NavigationOrientation = .horizontal
+
+    /// 自定义布局方向并创建 ``LooperViewController``。
+    /// - Parameter orientation: 新的布局方向
+    public init(orientation: UIPageViewController.NavigationOrientation) {
+        self.orientation = orientation
+        super.init(nibName: nil, bundle: nil)
+    }
 
     lazy var pager: UIPageViewController = {
         $0.delegate = self
@@ -70,8 +81,6 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
             return
         }
         self.delegate?.looperWillTransition(from: currentIndex, to: nextIndex)
-
-        // TODO: ?
     }
 
     public func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool,
@@ -90,6 +99,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     // MARK: Data Source
 
+    /// 轮播数据源。仅直接使用 ``LooperViewController`` 时（而非派生类型时）支持修改。
     public weak var dataSource: LooperDataSource?
 
     /// 轮播当前位置。
@@ -98,7 +108,6 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
             breakpoint("Data source has been disposed.")
             return nil
         }
-
         guard let viewController = self.pager.viewControllers?.first else {
             breakpoint("UIPageViewController has no current view controller.")
             return nil
@@ -123,7 +132,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     /// 根据当前索引，获取需要显示的上一页索引。
     ///
-    /// 默认实现将非 0 位置索引 - 1，否则返回 ``LooperDataSource/numberOfItems`` - 1。
+    /// 默认实现非 0 位置索引 - 1，否则返回 ``LooperDataSource/numberOfItems`` - 1。
     ///
     /// - Parameter index: 待查询索引
     /// - Returns: 上一页索引，可能为 `nil`。
@@ -197,6 +206,12 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     // MARK: Transition
 
+    /// 轮播在指定位置的停留时间。``LooperTransitionDelegate`` 提供的值优先于此方法返回值。
+    ///
+    /// 返回 0 可在当前位置停止轮播。
+    ///
+    /// - Parameter index: 页面位置
+    /// - Returns: 等待时间，单位：秒
     open func delayBeforeAutoTransition(at index: Int) -> TimeInterval {
         if let delegate = self.delegate {
             return delegate.delayBeforeAutoTransition(at: index)
@@ -226,26 +241,43 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
                 self.delegate?.postProcessAutoTransition(to: nil, withAnimation: completed)
             }
         }
+
+        if (self.dataSource?.numberOfItems ?? 0) > 1 {
+            self.setScrollingEnabled(true)
+        } else {
+            self.setScrollingEnabled(false)
+        }
     }
 
     /// 滚动到指定位置。
+    ///
+    /// 通过此方法滚动页面将触发 ``LooperTransitionDelegate/prepareForAutoTransition(to:)`` 和
+    /// ``LooperTransitionDelegate/postProcessAutoTransition(to:withAnimation:)``。
     ///
     /// - Parameter index: 新位置
     /// - Returns: 是否成功滚动。
     @discardableResult
     public func scrollTo(index: Int) -> Bool {
-        guard self.indexIsValid(index), let viewController = self.dataSource?.viewController(at: index) else {
+        guard self.indexIsValid(index), let dataSource = self.dataSource,
+              let viewController = self.dataSource?.viewController(at: index) else {
             return false
         }
 
         self.setViewController(viewController, animated: true)
+        if dataSource.numberOfItems > 1 {
+            self.setScrollingEnabled(true)
+        } else {
+            self.setScrollingEnabled(false)
+        }
         return true
     }
 
     /// 设置滚动是否开启。
     ///
+    /// 页面不支持「轮播」时（例如只有一页），请勿开启滚动，否则将导致页面错位。
+    ///
     /// - Parameter enabled: 允许滚动
-    public func setScrollEnabled(_ enabled: Bool) {
+    public func setScrollingEnabled(_ enabled: Bool) {
         if enabled {
             self.pager.dataSource = self
         } else {
@@ -255,19 +287,25 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     // MARK: Timer
 
+    /// 已提交的页面切换计划。
+    ///
+    /// 在 `DispatchQueue` 上提交新的切换计划后必须在此赋值，赋值将取消先前保存的计划。
+    ///
+    /// 如果要停止自动切换页面，赋值 `nil`。
     private var pendingTransition: DispatchWorkItem? {
         willSet {
             self.pendingTransition?.cancel()
         }
     }
 
-    /// 计划下次自动切换。
+    /// 计划并提交下次自动页面切换。
     ///
     /// - Parameters:
     ///   - index: 新位置
     ///   - delay: 切换前等待时间
     public func scheduleTransition(to index: Int, after delay: TimeInterval) {
         guard delay > 0 else {
+            self.pendingTransition = nil
             return
         }
 
