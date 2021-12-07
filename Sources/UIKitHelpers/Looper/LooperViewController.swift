@@ -2,92 +2,107 @@ import AutoLayout
 import Foundation
 import UIKit
 
-// MARK: - LooperViewControllerDataSource
+// MARK: - LooperDataSource
 
-public protocol LooperViewControllerDataSource: AnyObject {
-    func numberOfItems(inLooper viewController: LooperViewController) -> Int
-    func startIndex(ofLooper viewController: LooperViewController) -> Int
-    func looper(_ viewController: LooperViewController, itemAt index: Int) -> LooperViewController.Item
-    func looper(_ viewController: LooperViewController, indexOf item: LooperViewController.Item) -> Int
+/// 轮播数据源
+public protocol LooperDataSource: AnyObject {
+    /// 轮播项目数量。
+    var numberOfItems: Int { get }
+
+    /// 轮播开始位置。
+    var startIndex: Int { get }
+
+    /// 获取指定位置的 `UIViewController`。允许但强烈不建议返回 `nil`。
+    ///
+    /// - Returns: 指定位置的 `UIViewController`
+    func viewController(at index: Int) -> UIViewController?
+
+    /// 获取指定 `UIViewController` 所在位置。允许但强烈不建议返回 `nil`。
+    ///
+    /// - Returns: `UIViewController` 所在位置
+    func indexOf(_ viewController: UIViewController) -> Int?
 }
 
-public extension LooperViewControllerDataSource {
-    func startIndex(ofLooper viewController: LooperViewController) -> Int {
+public extension LooperDataSource {
+    var startIndex: Int {
         0
     }
 }
 
-// MARK: - LooperViewControllerDelegate
+// MARK: - LooperTransitionDelegate
 
-public protocol LooperViewControllerDelegate: AnyObject {
-    func looper(_ viewController: LooperViewController, willBeginTransitionFrom index: Int, to nextIndex: Int)
-    func looper(_ viewController: LooperViewController, didEndTransitionFrom previousIndex: Int, to index: Int)
-    func looper(_ viewController: LooperViewController, autoTransitionedTo index: Int)
+/// 轮播页面切换回调
+public protocol LooperTransitionDelegate: AnyObject {
+    /// 轮播页面即将被触摸操作切换。
+    ///
+    /// - Parameters:
+    ///   - index: 当前位置
+    ///   - nextIndex: 新位置
+    func looperWillTransition(from index: Int, to nextIndex: Int)
+
+    /// 轮播页面被触摸操作切换。
+    ///
+    /// 如果切换被取消（例如滑动操作距离过短或被打断），切换前、后位置可能相同。
+    ///
+    /// - Parameters:
+    ///   - previousIndex: 切换前位置
+    ///   - index: 切换后位置
+    func looperDidTransition(from previousIndex: Int, to index: Int)
+
+    /// 轮播页面即将被自动切换。
+    ///
+    /// - Parameter index: 新位置
+    func prepareForAutoTransition(to index: Int?)
+
+    /// 轮播页面被自动切换。
+    ///
+    /// - Parameters:
+    ///   - index: 切换后位置
+    ///   - withAnimation: 自动切换是否使用了动画
+    func postProcessAutoTransition(to index: Int?, withAnimation: Bool)
+
+    /// 轮播下次自动切换前等待时间。
+    ///
+    /// 返回 0 可在当前位置停止轮播。
+    ///
+    /// - Parameter index: 当前位置
+    /// - Returns: 等待时间，单位：秒
+    func delayBeforeAutoTransition(at index: Int) -> TimeInterval
 }
 
-public extension LooperViewControllerDelegate {
-    func looper(_ viewController: LooperViewController, autoTransitionedTo index: Int) {}
+public extension LooperTransitionDelegate {
+    func delayBeforeAutoTransition(at index: Int) -> TimeInterval {
+        3
+    }
 }
 
 // MARK: - LooperViewController
 
-/// 轮播视图控制器，支持横、纵布局。
-///
-/// 支持 3 种（互斥）视图提供方式：
-/// - 使用 ``setViewControllers(_:startIndex:)`` 提供需要轮播的子视图控制器，控制器将由 ``LooperViewController`` 管理。
-/// - 使用 ``setViews(_:startIndex:respectsSafeAreaInsets:)`` 提供需要轮播的视图，视图将由 ``LooperViewController`` 管理。
-/// - 使用 ``setDataSource(_:)`` 设置 ``LooperViewControllerDataSource`` 作为数据源，轮播过程中所有页面和索引处理都将请求数据源。
-///
-/// 同时支持 2 个事件回调：
-/// - 通过 ``LooperViewControllerDelegate/looper(_:willBeginTransitionFrom:to:)`` 回调页面切换前的当前和下一个页面索引。
-/// - 通过 ``LooperViewControllerDelegate/looper(_:didEndTransitionFrom:to:)`` 回调页面切换后的上一个和当前页面索引。
-public class LooperViewController: UIViewController, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
-    // MARK: Lifecycle
+/// 基于 ``LooperDataSource`` 的轮播 `UIViewController`。
+open class LooperViewController: UIViewController, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+    /// 轮播回调监听者
+    public weak var delegate: LooperTransitionDelegate?
+
+    // MARK: UIViewController
 
     deinit {
-        self.pendingTransition = nil
+        self.stopAutoTransition()
     }
 
-    override public func loadView() {
+    override open func loadView() {
         super.loadView()
         _ = self.pager
     }
 
-    override public func viewDidLoad() {
-        super.viewDidLoad()
-
-        if let dataSource = self.dataSource {
-            let controller = dataSource.looper(self, itemAt: dataSource.startIndex(ofLooper: self)).asViewController()
-            self.pager.setViewControllers([controller], direction: .forward, animated: false)
-        } else {
-            let controllers: [UIViewController]? = {
-                if self.subviewControllers.indices.contains(self.startIndex) {
-                    return [self.subviewControllers[self.startIndex]]
-                } else if let first = self.subviewControllers.first {
-                    return [first]
-                } else {
-                    return nil
-                }
-            }()
-            self.pager.setViewControllers(controllers, direction: .forward, animated: false)
-        }
-    }
-
-    override public func removeFromParent() {
-        self.cancelAutoScroll()
-        super.removeFromParent()
-    }
-
-    // MARK: Looper
+    // MARK: UIPageViewController
 
     /// 轮播布局方向。
     ///
-    /// 默认为横向。此属性只能在视图加载前（例如构造 ``LooperViewController`` 后）设置，当系统或调用者首次访问此 View Controller
-    /// 的视图 （`view`) 时，视图将根据布局方向创建并冻结布局方向，以后将不再参考此属性。
-    public var orientation: UIPageViewController.NavigationOrientation = .horizontal
+    /// 默认为横向。此属性只能在视图加载前（例如构造后）设置，当系统或调用者首次访问 ``LooperViewController``
+    /// 的视图 （`view`) 时，视图将根据布局方向创建并冻结，以后将不再参考此属性。
+    public private(set) var orientation: UIPageViewController.NavigationOrientation = .horizontal
 
-    private lazy var pager: UIPageViewController = {
-        $0.dataSource = self
+    lazy var pager: UIPageViewController = {
         $0.delegate = self
         $1.addChild($0)
         $1.view.addSubview($0.view)
@@ -97,130 +112,224 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
 
     public func pageViewController(_ pageViewController: UIPageViewController,
                                    viewControllerBefore viewController: UIViewController) -> UIViewController? {
-        if let dataSource = self.dataSource {
-            let count = dataSource.numberOfItems(inLooper: self)
-            let index = self.currentIndex
-            let item: Item? = {
-                switch index {
-                case -1:
-                    return nil
-                case 0:
-                    return dataSource.looper(self, itemAt: count - 1)
-                default:
-                    return dataSource.looper(self, itemAt: index - 1)
-                }
-            }()
-
-            return item?.asViewController()
-        }
-
-        guard let index = self.subviewControllers.firstIndex(of: viewController) else {
+        guard let dataSource = self.dataSource else {
+            breakpoint("Data source has been disposed.")
             return nil
         }
 
-        switch index {
-        case self.subviewControllers.startIndex:
-            return self.subviewControllers.last
-        default:
-            let previousIndex = index - 1
-            if self.subviewControllers.indices.contains(previousIndex) {
-                return self.subviewControllers[previousIndex]
-            }
-
-            breakpoint("Current index > 0 but (index - 1) is out of range. Why?")
+        guard let index = dataSource.indexOf(viewController) else {
             return nil
         }
+        return self.viewController(before: index)
     }
 
     public func pageViewController(_ pageViewController: UIPageViewController,
                                    viewControllerAfter viewController: UIViewController) -> UIViewController? {
-        if self.dataSource != nil {
-            let index = self.currentIndex
-            return self.viewController(after: index)
+        guard let dataSource = self.dataSource else {
+            breakpoint("Data source has been disposed.")
+            return nil
         }
 
-        guard let index = self.subviewControllers.firstIndex(of: viewController) else {
+        guard let index = dataSource.indexOf(viewController) else {
             return nil
         }
         return self.viewController(after: index)
     }
 
-    // MARK: Indexing
+    public func pageViewController(_ pageViewController: UIPageViewController,
+                                   willTransitionTo pendingViewControllers: [UIViewController]) {
+        self.pendingTransition = nil
 
-    private var shouldDetectRecursion = false
-
-    public var currentIndex: Int {
-        guard let current = self.pager.viewControllers?.first else {
-            breakpoint("UIPageViewController has no current view controller. Is this an error?")
-            return -1
+        guard let viewController = pendingViewControllers.first,
+              let currentIndex = self.currentIndex,
+              let nextIndex = self.dataSource?.indexOf(viewController) else {
+            return
         }
+        self.delegate?.looperWillTransition(from: currentIndex, to: nextIndex)
 
-        if let dataSource = self.dataSource {
-            guard !self.shouldDetectRecursion else {
-                breakpoint("Recursion detected when using data source!")
-                return 0
-            }
-            self.shouldDetectRecursion = true
-            defer {
-                self.shouldDetectRecursion = false
-            }
-            return dataSource.looper(self, indexOf: WrapperViewController.unwrap(current))
-        }
-
-        guard let first = self.subviewControllers.firstIndex(of: current) else {
-            breakpoint("Currently displayed view controller not in data source?!")
-            return -1
-        }
-        return first
+        // TODO: ?
     }
 
-    public var count: Int {
-        if let dataSource = self.dataSource {
-            guard !self.shouldDetectRecursion else {
-                breakpoint("Recursion detected when using data source!")
-                return 0
-            }
-            self.shouldDetectRecursion = true
-            defer {
-                self.shouldDetectRecursion = false
-            }
-            return dataSource.numberOfItems(inLooper: self)
+    public func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool,
+                                   previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
+        guard let viewController = previousViewControllers.first,
+              let previousIndex = self.dataSource?.indexOf(viewController),
+              let currentIndex = self.currentIndex else {
+            return
         }
+        self.delegate?.looperDidTransition(from: previousIndex, to: currentIndex)
 
-        return self.subviewControllers.count
+        if let nextIndex = self.index(after: currentIndex) {
+            self.scheduleTransition(to: nextIndex, after: self.delayBeforeAutoTransition(at: currentIndex))
+        }
     }
 
-    private func indexIsValid(_ index: Int) -> Bool {
-        if let dataSource = self.dataSource {
-            return (0..<dataSource.numberOfItems(inLooper: self)).contains(index)
+    // MARK: Data Source
+
+    public weak var dataSource: LooperDataSource?
+
+    /// 轮播当前位置。
+    public var currentIndex: Int? {
+        guard let dataSource = self.dataSource else {
+            breakpoint("Data source has been disposed.")
+            return nil
         }
-        return self.subviewControllers.indices.contains(index)
+
+        guard let viewController = self.pager.viewControllers?.first else {
+            breakpoint("UIPageViewController has no current view controller.")
+            return nil
+        }
+
+        return dataSource.indexOf(viewController)
     }
 
-    private func index(after index: Int) -> Int {
-        let max = max({
-            if let dataSource = self.dataSource {
-                return dataSource.numberOfItems(inLooper: self)
-            }
-            return self.subviewControllers.count
-        }() - 1, 1)
+    /// 检查索引是否存在或可用。
+    ///
+    /// 默认实现检查索引是否在 0 至 ``LooperDataSource/numberOfItems`` 之间。
+    ///
+    /// - Parameter index: 待查询索引
+    /// - Returns: 索引是否有效。
+    open func indexIsValid(_ index: Int) -> Bool {
+        guard let dataSource = self.dataSource else {
+            breakpoint("Data source has been disposed.")
+            return false
+        }
+        return (0..<dataSource.numberOfItems).contains(index)
+    }
+
+    /// 根据当前索引，获取需要显示的上一页索引。
+    ///
+    /// 默认实现将非 0 位置索引 - 1，否则返回 ``LooperDataSource/numberOfItems`` - 1。
+    ///
+    /// - Parameter index: 待查询索引
+    /// - Returns: 上一页索引，可能为 `nil`。
+    open func index(before index: Int) -> Int? {
+        guard let dataSource = self.dataSource else {
+            breakpoint("Data source has been disposed.")
+            return nil
+        }
+
+        let count = dataSource.numberOfItems
+        guard count > 0 else {
+            breakpoint("Data source is empty.")
+            return nil
+        }
 
         switch index {
-        case ..<0:
-            return 0
-        case 0..<max:
-            return index + 1
-        case max...:
+        case ..<0, count...:
+            breakpoint("Current index out of range.")
+            return nil
+        case 0:
+            return count - 1
+        default:
+            return index - 1
+        }
+    }
+
+    /// 根据当前索引，获取需要显示的下一页索引。
+    ///
+    /// 默认实现当索引为 ``LooperDataSource/numberOfItems`` - 1 时返回 0，否则将索引 + 1。
+    ///
+    /// - Parameter index: 待查询索引
+    /// - Returns: 下一页索引，可能为 `nil`。
+    open func index(after index: Int) -> Int? {
+        guard let dataSource = self.dataSource else {
+            breakpoint("Data source has been disposed.")
+            return nil
+        }
+
+        let count = dataSource.numberOfItems
+        guard count > 0 else {
+            breakpoint("Data source is empty.")
+            return nil
+        }
+
+        switch index {
+        case ..<0, count...:
+            breakpoint("Current index out of range.")
+            return nil
+        case count - 1:
             return 0
         default:
-            breakpoint("Impossible! Switch already covered all cases.")
-            return 0
+            return index + 1
         }
+    }
+
+    /// 根据当前索引，获取需要显示的上一个 `UIViewController`。
+    ///
+    /// - Parameter index: 待查询索引
+    /// - Returns: 上一页的 `UIViewController`，可能为 `nil`。
+    open func viewController(before index: Int) -> UIViewController? {
+        return self.index(before: index).flatMap { self.dataSource?.viewController(at: $0) }
+    }
+
+    /// 根据当前索引，获取需要显示的下一个 `UIViewController`。
+    ///
+    /// - Parameter index: 待查询索引
+    /// - Returns: 下一页的 `UIViewController`，可能为 `nil`。
+    open func viewController(after index: Int) -> UIViewController? {
+        return self.index(after: index).flatMap { self.dataSource?.viewController(at: $0) }
     }
 
     // MARK: Transition
 
-    public weak var delegate: LooperViewControllerDelegate?
+    open func delayBeforeAutoTransition(at index: Int) -> TimeInterval {
+        if let delegate = self.delegate {
+            return delegate.delayBeforeAutoTransition(at: index)
+        }
+        return 3
+    }
+
+    /// 重置或刷新当前显示的 `UIViewController`。将重新触发定时器和数据源请求。
+    ///
+    /// - Parameters:
+    ///   - viewController: 新的 `UIViewController`
+    ///   - animated: 是否使用动画
+    func setViewController(_ viewController: UIViewController?, animated: Bool) {
+        self.delegate?.prepareForAutoTransition(to: viewController.flatMap { self.dataSource?.indexOf($0) })
+
+        self.pager.setViewControllers(
+            viewController.flatMap { [$0] }, direction: .forward, animated: animated
+        ) { [weak self] completed in
+            guard let self = self else { return }
+            if let viewController = viewController, let index = self.dataSource?.indexOf(viewController) {
+                self.delegate?.postProcessAutoTransition(to: index, withAnimation: completed)
+
+                if let nextIndex = self.index(after: index) {
+                    self.scheduleTransition(to: nextIndex, after: self.delayBeforeAutoTransition(at: index))
+                }
+            } else {
+                self.delegate?.postProcessAutoTransition(to: nil, withAnimation: completed)
+            }
+        }
+    }
+
+    /// 滚动到指定位置。
+    ///
+    /// - Parameter index: 新位置
+    /// - Returns: 是否成功滚动。
+    @discardableResult
+    public func scrollTo(index: Int) -> Bool {
+        guard self.indexIsValid(index), let viewController = self.dataSource?.viewController(at: index) else {
+            return false
+        }
+
+        self.setViewController(viewController, animated: true)
+        return true
+    }
+
+    /// 设置滚动是否开启。
+    ///
+    /// - Parameter enabled: 允许滚动
+    public func setScrollEnabled(_ enabled: Bool) {
+        if enabled {
+            self.pager.dataSource = self
+        } else {
+            self.pager.dataSource = nil
+        }
+    }
+
+    // MARK: Timer
 
     private var pendingTransition: DispatchWorkItem? {
         willSet {
@@ -228,295 +337,27 @@ public class LooperViewController: UIViewController, UIPageViewControllerDataSou
         }
     }
 
-    public func pageViewController(_ pageViewController: UIPageViewController,
-                                   willTransitionTo pendingViewControllers: [UIViewController]) {
-        self.pendingTransition = nil
-
-        guard let next = pendingViewControllers.first else {
-            return
-        }
-
-        if let dataSource = self.dataSource {
-            let nextIndex = dataSource.looper(self, indexOf: WrapperViewController.unwrap(next))
-            self.preTransitionHook(from: self.currentIndex, to: nextIndex)
-            return
-        }
-
-        let currentIndex = self.currentIndex
-        guard let nextIndex = self.subviewControllers.firstIndex(of: next), currentIndex != -1 else {
-            return
-        }
-        self.preTransitionHook(from: currentIndex, to: nextIndex)
-    }
-
-    public func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool,
-                                   previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
-        guard let previous = previousViewControllers.first else { return }
-
-        if let dataSource = self.dataSource {
-            let previousIndex = dataSource.looper(self, indexOf: WrapperViewController.unwrap(previous))
-            self.postTransitionHook(from: previousIndex, to: self.currentIndex)
-            return
-        }
-
-        let currentIndex = self.currentIndex
-        guard let previousIndex = self.subviewControllers.firstIndex(of: previous), currentIndex != -1 else {
-            return
-        }
-        self.postTransitionHook(from: previousIndex, to: currentIndex)
-    }
-
-    private func preTransitionHook(from index: Int, to nextIndex: Int) {
-        self.delegate?.looper(self, willBeginTransitionFrom: index, to: nextIndex)
-    }
-
-    private func setViewController(_ viewController: UIViewController, animated: Bool = true,
-                                   completion: ((Bool) -> Void)? = nil) {
-        // TODO: Delegate code transition.
-        self.pager.setViewControllers([viewController], direction: .forward,
-                                      animated: animated, completion: completion)
-    }
-
-    /// 翻到指定页面。
-    ///
-    /// - Parameter index: 新页面索引
-    /// - Returns: 是否存在指定页面
-    @discardableResult public func scrollTo(index: Int) -> Bool {
-        guard let nextViewController = self.viewController(after: index - 1) else {
-            return false
-        }
-        self.pager.setViewControllers([nextViewController], direction: .forward, animated: true) { _ in
-            // TODO: Delegate auto transition.
-            self.scheduleAutoScroll(to: self.index(after: index), after: 5)
-        }
-        return true
-    }
-
-    private func postTransitionHook(from previousIndex: Int, to index: Int) {
-        self.delegate?.looper(self, didEndTransitionFrom: previousIndex, to: index)
-
-        // TODO: Callback.
-        self.scheduleAutoScroll(to: self.index(after: index), after: 5)
-    }
-
-    /// 计划自动翻页。调用此方法将取消先前所有计划翻页。
+    /// 计划下次自动切换。
     ///
     /// - Parameters:
-    ///   - index: 请求翻页到此索引。翻页前将重复检查索引有效性，无效索引将被丢弃。
-    ///   - delay: 等待时间，自现在开始计时。
-    public func scheduleAutoScroll(to index: Int, after delay: TimeInterval) {
-        let nextTransition = DispatchWorkItem { [weak self] in
-            guard let self = self, self.indexIsValid(index) else { return }
+    ///   - index: 新位置
+    ///   - delay: 切换前等待时间
+    public func scheduleTransition(to index: Int, after delay: TimeInterval) {
+        guard delay > 0 else {
+            return
+        }
+
+        let transition = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
             self.scrollTo(index: index)
-            self.delegate?.looper(self, autoTransitionedTo: index)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: nextTransition)
-        self.pendingTransition = nextTransition
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: transition)
+        self.pendingTransition = transition
     }
 
-    /// 取消所有自动翻页。
-    public func cancelAutoScroll() {
+    /// 取消所有自动切换。
+    public func stopAutoTransition() {
         self.pendingTransition = nil
-    }
-
-    // MARK: Data Source
-
-    /// 轮播初始位置。
-    ///
-    /// 使用 ``setViewControllers(_:startIndex:)`` 或 ``setViews(_:startIndex:respectsSafeAreaInsets:)`` 修改此属性。
-    public private(set) var startIndex = 0
-
-    /// 轮播数据源。
-    ///
-    /// 轮播通过 `UIPageViewController` 并结合此数据源实现。使用 ``setViewControllers(_:startIndex:)`` 或
-    /// ``setViews(_:startIndex:respectsSafeAreaInsets:)`` 修改此属性。
-    public private(set) var subviewControllers: [UIViewController] = []
-
-    /// 轮播数据源。
-    ///
-    ///
-    public private(set) weak var dataSource: LooperViewControllerDataSource?
-
-    private func viewController(after index: Int) -> UIViewController? {
-        // 询问数据源
-        if let dataSource = self.dataSource {
-            let count = dataSource.numberOfItems(inLooper: self)
-            let item: Item? = {
-                switch index {
-                case count - 1:
-                    return dataSource.looper(self, itemAt: 0)
-                default:
-                    return dataSource.looper(self, itemAt: index + 1)
-                }
-            }()
-
-            return item?.asViewController()
-        }
-
-        // 取静态数据
-        switch index {
-        case self.subviewControllers.endIndex - 1:
-            return self.subviewControllers.first
-        default:
-            let nextIndex = index + 1
-            if self.subviewControllers.indices.contains(nextIndex) {
-                return self.subviewControllers[nextIndex]
-            }
-
-            assertionFailure("Current index < (count - 1) but (index + 1) is out of range. Why?")
-            return nil
-        }
-    }
-
-    /// 设置一个或多个 `UIViewController` 作为数据源。如果通过此方法设置静态数据，基于回调的数据源将被舍弃。
-    ///
-    /// - Parameters:
-    ///   - controllers: 数据源，如果为空将清空当前轮播数据。
-    ///   - startIndex: 刷新数据后的初始位置，如果越界将使用 0。
-    public func setViewControllers(_ controllers: [UIViewController], startIndex: Int = 0) {
-        #warning("Stop animation.")
-
-        self.dataSource = nil
-
-        guard !controllers.isEmpty else {
-            if self.isViewLoaded {
-                self.pager.setViewControllers(nil, direction: .forward, animated: true) { _ in
-                    self.subviewControllers = []
-                    self.startIndex = 0
-                }
-            } else {
-                self.subviewControllers = []
-                self.startIndex = 0
-            }
-            return
-        }
-
-        if self.isViewLoaded {
-            let newControllers: [UIViewController]? = {
-                if controllers.indices.contains(startIndex) {
-                    return [controllers[startIndex]]
-                } else if let first = controllers.first {
-                    return [first]
-                } else {
-                    return nil
-                }
-            }()
-            self.pager.setViewControllers(newControllers, direction: .forward, animated: false) { _ in
-                self.subviewControllers = controllers
-                self.startIndex = startIndex
-            }
-        } else {
-            self.subviewControllers = controllers
-            self.startIndex = startIndex
-        }
-    }
-
-    /// 设置一个或多个 `UIView` 作为数据源。如果通过此方法设置静态数据，基于回调的数据源将被舍弃。
-    ///
-    /// - Parameters:
-    ///   - views: 数据源，如果为空将清空当前轮播数据。
-    ///   - startIndex: 刷新数据后的初始位置，如果越界将使用 0。
-    ///   - respectsSafeAreaInsets: 布局 `UIView` 时参考安全边界，置否（默认）将尝试充满轮播区域。
-    public func setViews(_ views: [UIView], startIndex: Int = 0, respectsSafeAreaInsets: Bool) {
-        #warning("Stop animation.")
-
-        self.dataSource = nil
-
-        guard !views.isEmpty else {
-            if self.isViewLoaded {
-                self.pager.setViewControllers(nil, direction: .forward, animated: true) { _ in
-                    self.subviewControllers = []
-                    self.startIndex = 0
-                }
-            } else {
-                self.subviewControllers = []
-                self.startIndex = 0
-            }
-            return
-        }
-
-        let viewControllers: [UIViewController] = views.map {
-            WrapperViewController.wrap($0, respectsSafeAreaInsets: respectsSafeAreaInsets)
-        }
-        if self.isViewLoaded {
-            let newControllers: [UIViewController]? = {
-                if viewControllers.indices.contains(startIndex) {
-                    return [viewControllers[startIndex]]
-                } else if let first = viewControllers.first {
-                    return [first]
-                } else {
-                    return nil
-                }
-            }()
-            self.pager.setViewControllers(newControllers, direction: .forward, animated: false) { _ in
-                self.subviewControllers = viewControllers
-                self.startIndex = startIndex
-            }
-        } else {
-            self.subviewControllers = viewControllers
-            self.startIndex = startIndex
-        }
-    }
-
-    /// 设置轮播数据源。如果通过此方法设置基于回调的数据源，静态数据将被舍弃。
-    ///
-    /// - Parameter dataSource: 实现 ``LooperViewControllerDataSource`` 的数据源。
-    public func setDataSource(_ dataSource: LooperViewControllerDataSource) {
-        #warning("Stop animation.")
-
-        let startIndex = dataSource.startIndex(ofLooper: self)
-        if self.isViewLoaded {
-            let controller = dataSource.looper(self, itemAt: startIndex).asViewController()
-            self.pager.setViewControllers([controller], direction: .forward, animated: false)
-        }
-        self.dataSource = dataSource
-    }
-}
-
-// MARK: - LooperViewController.Item
-
-public extension LooperViewController {
-    enum Item {
-        case view(UIView, respectsSafeAreaInsets: Bool?)
-        case viewController(UIViewController)
-
-        func asViewController() -> UIViewController {
-            switch self {
-            case let .view(view, respectsSafeAreaInsets):
-                return WrapperViewController.wrap(view, respectsSafeAreaInsets: respectsSafeAreaInsets == true)
-            case let .viewController(viewController):
-                return viewController
-            }
-        }
-    }
-}
-
-// MARK: - View Wrapper
-
-final class WrapperViewController: UIViewController {
-    private var content: UIView!
-
-    static func wrap(_ view: UIView, respectsSafeAreaInsets: Bool) -> Self {
-        let wrapper = Self()
-        wrapper.content = view
-        view.clipsToBounds = true
-        wrapper.view.addSubview(view)
-        if respectsSafeAreaInsets {
-            view.autoLayout(in: wrapper.view.safeAreaLayoutGuide,
-                            top: 0, bottom: 0, leading: 0, trailing: 0)
-        } else {
-            view.autoLayout(in: wrapper.view, top: 0, bottom: 0, leading: 0, trailing: 0)
-        }
-        return wrapper
-    }
-
-    static func unwrap(_ viewController: UIViewController) -> LooperViewController.Item {
-        switch viewController {
-        case let wrapper as Self:
-            return .view(wrapper.content, respectsSafeAreaInsets: nil)
-        default:
-            return .viewController(viewController)
-        }
     }
 }
 

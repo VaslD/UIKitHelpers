@@ -11,8 +11,9 @@ let package = Package(
         .library(name: "UIKitHelpers", targets: ["UIKitHelpers"])
     ],
     dependencies: [
-        .package(name: "Auto Layout", path: "../Auto Layout")],
+        .package(name: "AutoLayout", path: "../Auto Layout")
+    ],
     targets: [
-        .target(name: "UIKitHelpers"),
+        .target(name: "UIKitHelpers", dependencies: ["AutoLayout"]),
     ]
 )
