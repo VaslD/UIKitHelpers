@@ -1,5 +1,3 @@
-#if canImport(UIKit)
-
 import UIKit
 
 open class ImageOnRightButton: UIButton {
@@ -20,5 +18,3 @@ open class ImageOnRightButton: UIButton {
         self.imageEdgeInsets = UIEdgeInsets(top: 0, left: -5, bottom: 0, right: 0)
     }
 }
-
-#endif

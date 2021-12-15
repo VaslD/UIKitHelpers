@@ -1,14 +1,8 @@
-#if canImport(UIKit)
-
 import UIKit
 
-/// 自动为视图添加圆角，圆角弧径保持为短边长度的一半。
-///
-/// **使用方法**
+/// 自动为视图添加圆角，圆角弧径保持为短边长度的一半，并跟随自动布局变化。
 ///
 /// 设计自定义视图时，声明遵循此协议并重载 `layoutSubviews()` 方法，然后在重载实现最后调用 `autoRoundCorners()`。
-///
-/// **代码示例**
 ///
 /// ```swift
 /// public class UIRoundButton: UIButton, RoundedCorners {
@@ -40,5 +34,3 @@ public extension RoundedCorners {
         self.clipsToBounds = true
     }
 }
-
-#endif
