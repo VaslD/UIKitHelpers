@@ -1,5 +1,6 @@
 import AutoLayout
 import Foundation
+import os
 import UIKit
 
 /// 基于 ``LooperDataSource`` 的轮播 `UIViewController`。
@@ -9,11 +10,8 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
     // MARK: UIViewController
 
-    override public init(nibName nib: String?, bundle: Bundle?) {
-        super.init(nibName: nib, bundle: bundle)
-    }
-
     public required init?(coder: NSCoder) {
+        self.orientation = .horizontal
         super.init(coder: coder)
     }
 
@@ -32,13 +30,19 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
     ///
     /// 默认为横向。此属性只能在视图加载前（例如构造后）设置，当 UIKit 或调用者首次访问 ``LooperViewController``
     /// 的视图 （`view`) 时，视图将根据布局方向创建并冻结，以后将不再参考此属性。
-    public private(set) var orientation: UIPageViewController.NavigationOrientation = .horizontal
+    public private(set) var orientation: UIPageViewController.NavigationOrientation
 
     /// 自定义布局方向并创建 ``LooperViewController``。
+    ///
     /// - Parameter orientation: 新的布局方向
-    public init(orientation: UIPageViewController.NavigationOrientation) {
+    public required init(orientation: UIPageViewController.NavigationOrientation) {
         self.orientation = orientation
         super.init(nibName: nil, bundle: nil)
+    }
+
+    /// 创建横向布局的 ``LooperViewController``。
+    public convenience init() {
+        self.init(orientation: .horizontal)
     }
 
     lazy var pager: UIPageViewController = {
@@ -49,7 +53,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
         $0.didMove(toParent: self)
         self.scrollView = $0.view.subviews.first { $0 is UIScrollView } as? UIScrollView
         return $0
-    }(PageViewController(transitionStyle: .scroll, navigationOrientation: self.orientation, options: nil), self)
+    }(LooperPageViewController(transitionStyle: .scroll, navigationOrientation: self.orientation, options: nil), self)
 
     public func pageViewController(_ pageViewController: UIPageViewController,
                                    viewControllerBefore viewController: UIViewController) -> UIViewController? {
@@ -246,7 +250,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
     /// - Parameters:
     ///   - viewController: 新的 `UIViewController`
     ///   - animated: 是否使用动画
-    func setViewController(_ viewController: UIViewController?, animated: Bool) {
+    public func setViewController(_ viewController: UIViewController?, animated: Bool) {
         let runsAsync = self.cancelTouches()
 
         let work = DispatchWorkItem {
@@ -254,16 +258,15 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 
             self.pager.setViewControllers(
                 viewController.flatMap { [$0] }, direction: .forward, animated: animated
-            ) { [weak self] completed in
-                guard let self = self else { return }
+            ) { completed in
                 if let viewController = viewController, let index = self.dataSource?.indexOf(viewController) {
-                    self.delegate?.postProcessAutoTransition(to: index, withAnimation: completed)
+                    self.postProcessAutoTransitionAsync(to: index, animated: completed)
 
                     if let nextIndex = self.index(after: index) {
                         self.scheduleTransition(to: nextIndex, after: self.delayBeforeAutoTransition(at: index))
                     }
                 } else {
-                    self.delegate?.postProcessAutoTransition(to: nil, withAnimation: completed)
+                    self.postProcessAutoTransitionAsync(to: nil, animated: completed)
                 }
             }
 
@@ -277,6 +280,13 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
             DispatchQueue.main.async(execute: work)
         } else {
             work.perform()
+        }
+    }
+
+    /// 异步回调，避免 ``delegate`` 执行耗时工作、动画或切换 ``dataSource`` 等触发 `UIPageViewController` 内部检查异常。
+    private func postProcessAutoTransitionAsync(to index: Int?, animated: Bool) {
+        DispatchQueue.main.async {
+            self.delegate?.postProcessAutoTransition(to: nil, animated: animated)
         }
     }
 
@@ -356,15 +366,15 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
 // MARK: - Debugging
 
 private func breakpoint(_ message: String) {
-    print(message)
-#if DEBUG
+    print("[LooperViewController] Warning:", message)
+#if LOOPER_BREAK_ON_WARNING
     raise(SIGINT)
 #endif
 }
 
-// MARK: - PageViewController
+// MARK: - LooperPageViewController
 
-private class PageViewController: UIPageViewController {
+private class LooperPageViewController: UIPageViewController {
     override func setViewControllers(_ viewControllers: [UIViewController]?,
                                      direction: UIPageViewController.NavigationDirection,
                                      animated: Bool, completion: ((Bool) -> Void)? = nil) {

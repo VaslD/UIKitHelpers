@@ -5,18 +5,6 @@ import UIKit
 /// 使用此组件时不能修改 ``LooperViewController/dataSource``，请通过 ``setViewControllers(_:startIndex:)``
 /// 提供每页的 `UIViewController`。
 open class ViewControllersLooper: LooperViewController, LooperDataSource {
-    override public init(nibName nib: String?, bundle: Bundle?) {
-        super.init(nibName: nib, bundle: bundle)
-    }
-
-    public required init?(coder: NSCoder) {
-        super.init(coder: coder)
-    }
-
-    override public init(orientation: UIPageViewController.NavigationOrientation) {
-        super.init(orientation: orientation)
-    }
-
     override open func viewDidLoad() {
         super.viewDidLoad()
         self.dataSource = self

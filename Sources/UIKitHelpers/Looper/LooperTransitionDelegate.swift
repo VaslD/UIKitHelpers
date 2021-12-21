@@ -28,7 +28,7 @@ public protocol LooperTransitionDelegate: AnyObject {
     /// - Parameters:
     ///   - index: 切换后位置
     ///   - withAnimation: 自动切换是否使用了动画
-    func postProcessAutoTransition(to index: Int?, withAnimation: Bool)
+    func postProcessAutoTransition(to index: Int?, animated: Bool)
 
     /// 轮播在指定位置的停留时间。
     ///
