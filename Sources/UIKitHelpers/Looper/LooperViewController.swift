@@ -286,7 +286,7 @@ open class LooperViewController: UIViewController, UIPageViewControllerDataSourc
     /// 异步回调，避免 ``delegate`` 执行耗时工作、动画或切换 ``dataSource`` 等触发 `UIPageViewController` 内部检查异常。
     private func postProcessAutoTransitionAsync(to index: Int?, animated: Bool) {
         DispatchQueue.main.async {
-            self.delegate?.postProcessAutoTransition(to: nil, animated: animated)
+            self.delegate?.postProcessAutoTransition(to: index, animated: animated)
         }
     }
 
